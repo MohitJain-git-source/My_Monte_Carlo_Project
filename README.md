@@ -24,7 +24,7 @@ The engine dynamically fetches the last 2 years of trading data via yfinance to 
 
 ## 🏗 Architecture
 
-The pricing engine follows a modular layered structure to ensure clarity, scalability, and analytical transparency:
+The pricing engine follows the Layers:
 
 ### • Data Layer
 - Fetches historical market data using `yfinance`
@@ -69,26 +69,24 @@ These assumptions allow numerical stability and comparability across pricing met
 
 ## ⚠ Limitations
 
-While the framework captures core derivative pricing mechanics, several real-world complexities are abstracted:
+While the framework captures core pricing mechanics, several real-world complexities are abstracted:
 
-- **Historical volatility is used instead of implied volatility**
+- Historical volatility is used instead of implied volatility
 - No stochastic volatility modeling (e.g., Heston framework)
 - No volatility skew calibration
 - American early-exercise feature modeled solely via Implicit FDM
 - Market microstructure effects and transaction costs are excluded
 
-The model therefore provides a controlled quantitative benchmark rather than a fully market-calibrated pricing system.
-
-
-##🌍 Supported Option Styles & Indices
+## 🌍 Supported Option Styles & Indices
 * **European Option (DAX Index):** Standard exercise strictly at expiration. Valued using Standard Monte Carlo simulation.
 * **American Option (S&P 500):** Features an early-exercise premium. Valued using the unconditionally stable Implicit Finite Difference Method (FDM).
-***Asian Option (Nikkei 225):** Path-dependent payoff based on the average price over the option's life. Valued using Path-Averaging Monte Carlo simulation.
+* **Asian Option (Nikkei 225):** Path-dependent payoff based on the average price over the option's life. Valued using Path-Averaging Monte Carlo simulation.
 
 ## 🧮 Mathematical Model
 
-1. **Geometric Brownian Motion (GBM)** 
-For visualization and **Probability of Profit**  calculations across all models, the asset price paths are simulated using Geometric Brownian Motion for **10,000 future price paths**, which models the price path as a stoachastic process. The discrete-time formula used is:
+### 1. **Geometric Brownian Motion (GBM)** 
+is used to calculate the **Probability of Profit** across all models as a stoachastic process. The asset price paths are simulated for **10,000 future price paths**.
+The discrete-time formula used is:
 
 $$S_{t} = S_{t-1} \cdot e^{(r - \frac{1}{2}\sigma^2)dt + \sigma\sqrt{dt}Z}$$
 
@@ -98,61 +96,71 @@ Where:
 * $dt$ = Time step (1 day)
 * $Z$ = Random sample from standard normal distribution $\mathcal{N}(0,1)$
 
-2. **Implicit Finite Difference Method (FDM)**
+## 2. Implicit Finite Difference Method (FDM)
 
-To capture the **early-exercise premium** of **American options**, the engine solves the **Black–Scholes PDE with dividends** on a discrete **time–price grid** and steps **backward from maturity to today** using an **implicit (unconditionally stable) finite difference scheme**:
+To capture the **early-exercise premium** of **American options**, the engine solves the **Black–Scholes PDE with dividends** on a discrete **time–price grid** and steps **backward from maturity to today** using an **implicit finite difference scheme**:
 
-\[
+$$
 \frac{\partial V}{\partial t}
 +\frac{1}{2}\sigma^{2}S^{2}\frac{\partial^{2}V}{\partial S^{2}}
 +(r-q)S\frac{\partial V}{\partial S}
 -rV = 0
-\]
+$$
 
-### • Discretization and Grid Setup
-- The price domain is truncated at a sufficiently large upper bound \( S_{\max} = 3S_0 \)
+### Discretization and Grid Setup
+
+- The price domain is truncated at a sufficiently large upper bound:  
+  $S_{\max} = 3S_0$
 - A uniform grid is used with:
-  - \( M = 150 \) price steps and \( N = 1000 \) time steps  
-  - \( \Delta t = T/N \), and \( S_j = j\Delta S \)
+  - $M = 150$ price steps and $N = 1000$ time steps  
+  - $\Delta t = T/N$, and $S_j = j\Delta S$
 
 The implicit scheme forms a linear system at each time step:
-\[
-A \, V^{n+1} = V^{n}
-\]
-where \(A\) is **tridiagonal**, making the method computationally efficient.
 
-### • Boundary Conditions
+$$
+A \, V^{n+1} = V^{n}
+$$
+
+where $A$ is **tridiagonal**, making the method computationally efficient.
+
+### Boundary Conditions
+
 At each backward time step, boundary conditions are enforced:
 
 **Call option:**
-- \( V(0,t) = 0 \)
-- \( V(S_{\max},t) \approx S_{\max} - K e^{-r(T-t)} \)
+
+- $V(0,t) = 0$
+- $V(S_{\max},t) \approx S_{\max} - K e^{-r(T-t)}$
 
 **Put option:**
-- \( V(0,t) \approx K e^{-r(T-t)} \)
-- \( V(S_{\max},t) = 0 \)
 
-These conditions match the asymptotic behavior of the option value as \(S \to 0\) and \(S \to S_{\max}\).
+- $V(0,t) \approx K e^{-r(T-t)}$
+- $V(S_{\max},t) = 0$
 
-### • Tridiagonal System Solution
-The discretization produces a **banded tridiagonal matrix**, which is solved each step using a stable banded linear solver (e.g., `solve_banded`). This results in **unconditional stability**, allowing fine time resolution (\(N=1000\)) without numerical blow-up.
+These conditions match the asymptotic behavior of the option value as $S \to 0$ and $S \to S_{\max}$.
 
-### • American Early-Exercise Constraint
+### Tridiagonal System Solution
+
+The discretization produces a **banded tridiagonal matrix**, which is solved each step using a stable banded linear solver (e.g., `solve_banded`). This results in **unconditional stability**, allowing fine time resolution ($N=1000$) without numerical blow-up.
+
+### American Early-Exercise Constraint
+
 After solving the PDE step, the engine applies the American constraint via a pointwise projection:
 
-\[
+$$
 V(S,t) = \max\left(V(S,t), \text{Intrinsic}(S)\right)
-\]
+$$
 
 with:
-- Call intrinsic value: \( \max(S-K,0) \)
-- Put intrinsic value: \( \max(K-S,0) \)
 
-A constant dividend yield \( q = 1.5\% \) is included to make early-exercise behavior observable in the American framework.
+- Call intrinsic value: $\max(S-K,0)$
+- Put intrinsic value: $\max(K-S,0)$
+
+A constant dividend yield $q = 1.5\%$ is included to make early-exercise behavior observable in the American framework.
 
 ## Visual Output
 
-The script generates a comprehensive suite of visualizations saved directly to an **`/assets`** directory:
+The script generates visualizations of the Distributions and Key Metrics saved directly to an **`/assets`** directory:
 
 1. **Individual Asset Dashboards**  
    A two-panel plot for each index displaying:
@@ -163,8 +171,7 @@ The script generates a comprehensive suite of visualizations saved directly to a
    A side-by-side bar chart comparing:
    - **Annualized Volatility**
    - **Probability of Profit**
-   - **Relative Premium**  
-   across all **three global indices**.
+   - **Relative Premium** across all **three global indices**.
 
    ## 📋 Simulation Parameters
 
@@ -217,7 +224,7 @@ Despite high volatility, probability of profit remains close to 44%.
 Nikkei shows the highest volatility and widest price distribution.  
 S&P 500 delivers the highest probability of profit (~45%).  
 DAX commands the highest relative premium vs. spot, reflecting pricing differences across models and volatility regimes.
----
+
 
 ## 🧪 Future Improvements
 
@@ -237,5 +244,3 @@ While the current framework provides a robust numerical pricing engine under cla
 - Numerical computation of **Greeks (Δ, Γ, Θ, Vega, ρ)**  
 - Sensitivity comparison across Monte Carlo and FDM methods  
 - Stability and convergence diagnostics
-
-These extensions aim to transition the project from a controlled quantitative benchmark model toward a more market-calibrated and performance-optimized pricing framework.
